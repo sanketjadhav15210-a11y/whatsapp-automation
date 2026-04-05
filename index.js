@@ -58,7 +58,7 @@ mongoose.connect(MONGODB_URI).then(() => {
     client.on('qr', (qr) => {
         console.log('--- ACTION REQUIRED ---');
         console.log('Please scan the QR code below using your WhatsApp (Linked Devices):');
-        qrcode.generate(qr, { small: true });
+        qrcode.generate(qr, { small: false });
         console.log('NOTE: If you are deploying to Render, you must read this QR code from the Render Logs window!');
         console.log('-----------------------');
     });
