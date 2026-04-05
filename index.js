@@ -60,8 +60,11 @@ mongoose.connect(MONGODB_URI).then(() => {
         console.log('--- ACTION REQUIRED ---');
         console.log('Please scan the QR code below using your WhatsApp (Linked Devices):');
         qrcode.generate(qr, { small: false });
-        console.log('NOTE: If you are deploying to Render, you must read this QR code from the Render Logs window!');
-        console.log('-----------------------');
+        console.log('\n======================================================');
+        console.log('🛑 TERMINAL QR NOT WORKING OR DEFORMED? 🛑');
+        console.log('Copy this URL and open it in a new browser tab to see a perfect QR Code:');
+        console.log(`https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(qr)}`);
+        console.log('======================================================\n');
     });
 
     client.on('remote_session_saved', () => {
