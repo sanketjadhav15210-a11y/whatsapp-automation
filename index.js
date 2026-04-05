@@ -39,8 +39,9 @@ mongoose.connect(MONGODB_URI).then(() => {
             backupSyncIntervalMs: 300000 // 5 minutes
         }),
         puppeteer: {
-            // Render uses Linux, so we need these args to run Puppeteer smoothly
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
+            // Use the system-installed Chrome in Docker, or bundled Chromium locally
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
         }
     });
 
