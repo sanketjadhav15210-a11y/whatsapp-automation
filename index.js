@@ -1,5 +1,5 @@
 require('dotenv').config();
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeCacheableSignalKeyStore } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, initAuthCreds } = require('@whiskeysockets/baileys');
 const cron = require('node-cron');
 const fs = require('fs');
 const path = require('path');
@@ -80,7 +80,7 @@ async function mongoAuthState() {
     
     return {
         state: {
-            creds: creds || undefined,
+            creds: creds || initAuthCreds(),
             keys: {
                 get: async (type, ids) => {
                     const data = {};
