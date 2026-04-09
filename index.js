@@ -109,6 +109,10 @@ async function startBot() {
 
     const client = new Client({
         authStrategy: authStrategy,
+        pairWithPhoneNumber: {
+            phone: TARGET_PHONE_NUMBER,
+            showNotification: true
+        },
         puppeteer: {
             executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
             args: [
