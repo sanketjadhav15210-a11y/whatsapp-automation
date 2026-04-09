@@ -160,7 +160,7 @@ async function startBot() {
                 keys: makeCacheableSignalKeyStore(state.keys, console.log)
             },
             printQRInTerminal: false, // We use pairing code instead
-            browser: ['Flashcard Bot', 'Chrome', '10.0'],
+            browser: ["Ubuntu", "Chrome", "20.0.04"],
         });
 
         // Request pairing code if not registered
