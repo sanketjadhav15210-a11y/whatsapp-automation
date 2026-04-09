@@ -16,11 +16,29 @@ const MONGODB_URI = process.env.MONGODB_URI;
 const USE_REMOTE_AUTH = process.env.USE_REMOTE_AUTH === 'true';
 // =======================
 
-// Render expects web services to bind to a port, otherwise the deployment fails.
+// Store latest QR for web display
+let latestQR = null;
+let botStatus = 'starting';
+
+// Web server that shows QR code for easy scanning
 const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('WhatsApp Quiz Bot is running!\n');
+    if (botStatus === 'ready') {
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end('<html><body style="background:#111;color:#0f0;display:flex;align-items:center;justify-content:center;height:100vh;font-family:monospace;font-size:2em"><h1>✅ Bot is connected and running!</h1></body></html>');
+    } else if (latestQR) {
+        const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(latestQR)}`;
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end(`<html><head><meta http-equiv="refresh" content="5"></head><body style="background:#111;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:monospace">
+            <h1>📱 Scan this QR with WhatsApp</h1>
+            <p>WhatsApp → Linked Devices → Link a Device</p>
+            <img src="${qrImageUrl}" style="border:8px solid white;border-radius:12px;margin:20px">
+            <p style="color:#888">Page auto-refreshes every 5 seconds</p>
+        </body></html>`);
+    } else {
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end('<html><head><meta http-equiv="refresh" content="3"></head><body style="background:#111;color:#ff0;display:flex;align-items:center;justify-content:center;height:100vh;font-family:monospace;font-size:1.5em"><h1>⏳ Waiting for QR code... (auto-refreshing)</h1></body></html>');
+    }
 }).listen(PORT, () => {
     console.log(`Web server listening on port ${PORT} (Required for Render health checks)`);
 });
@@ -87,14 +105,11 @@ async function startBot() {
     let isReady = false;
 
     client.on('qr', (qr) => {
+        latestQR = qr; // Store for web page
         console.log('\n--- ACTION REQUIRED ---');
-        console.log('Please scan the QR code below using your WhatsApp (Linked Devices):');
+        console.log('Scan the QR at your Render URL or use the link below:');
         qrcode.generate(qr, { small: false });
-        console.log('\n======================================================');
-        console.log('🛑 TERMINAL QR NOT WORKING OR DEFORMED? 🛑');
-        console.log('Copy this URL and open it in a new browser tab to see a perfect QR Code:');
-        console.log(`https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(qr)}`);
-        console.log('======================================================\n');
+        console.log(`\nQR URL: https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(qr)}`);
     });
 
     if (USE_REMOTE_AUTH) {
@@ -114,6 +129,8 @@ async function startBot() {
     client.on('ready', () => {
         console.log('🚀 WhatsApp Client is ready! Dashboard connected.');
         isReady = true;
+        botStatus = 'ready';
+        latestQR = null;
 
         // Set up the daily flashcard cron job
         cron.schedule(FLASHCARD_SCHEDULE, () => {
