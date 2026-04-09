@@ -6,6 +6,7 @@ const mongoose = require('mongoose');
 const cron = require('node-cron');
 const fs = require('fs');
 const http = require('http');
+const he = require('he');
 
 // ==== CONFIGURATION ====
 const TARGET_PHONE_NUMBER = process.env.TARGET_PHONE_NUMBER || '919930488938'; 
@@ -28,6 +29,8 @@ http.createServer((req, res) => {
     console.log(`Web server listening on port ${PORT} (Required for Render health checks)`);
 });
 
+let currentQuiz = []; // Store the latest quiz for answer verification globally
+
 // Connect to MongoDB to store WhatsApp Session
 mongoose.connect(MONGODB_URI).then(() => {
     console.log('Connected to MongoDB. Initializing WhatsApp Client...');
@@ -39,7 +42,6 @@ mongoose.connect(MONGODB_URI).then(() => {
             backupSyncIntervalMs: 300000 // 5 minutes
         }),
         puppeteer: {
-            // Use the system-installed Chrome in Docker, or bundled Chromium locally
             executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
             args: [
                 '--no-sandbox',
@@ -84,6 +86,32 @@ mongoose.connect(MONGODB_URI).then(() => {
         console.log(`Cron job scheduled. Waiting for ${CRON_SCHEDULE} to trigger...`);
     });
 
+    // Handle incoming messages for answer verification
+    client.on('message', async (msg) => {
+        const from = msg.from;
+        const body = msg.body.trim().toUpperCase();
+
+        // Only handle messages from our target number or if multiple users are allowed (currently restricted to target)
+        if (from !== `${TARGET_PHONE_NUMBER}@c.us`) return;
+
+        console.log(`Received message from ${from}: ${body}`);
+
+        // Handle simple answer checking (A, B, C, D)
+        if (['A', 'B', 'C', 'D'].includes(body)) {
+            if (currentQuiz.length === 0) {
+                msg.reply("No active quiz found. Wait for the next scheduled trivia!");
+                return;
+            }
+
+            // This is a simple implementation that checks against the *last* set of questions sent.
+            // For a more robust version, we'd track which question the user is on.
+            // For now, we'll just give a hint based on the latest sent questions.
+            msg.reply("Thanks for your answer! I'm currently in 'Broadcast Mode'. In the next version, I'll track your score individually. \n\nCheck the spoiler in the trivia message to see if you were right! ✅");
+        } else if (body === 'HELP') {
+            msg.reply("I'm the Trivia Bot! 🤖\n\nI send 10 trivia questions daily. You can reply with A, B, C, or D to practice (though I don't track scores yet!).\n\nType 'TEST' in my server console to trigger questions manually.");
+        }
+    });
+
     // Handle terminal input so the user can type "test" to see it working instantly (Local only)
     process.stdin.on('data', (data) => {
         const input = data.toString().trim();
@@ -122,21 +150,58 @@ function formatQuestions(questions) {
     return messageBody;
 }
 
+async function fetchQuestionsFromAPI() {
+    try {
+        console.log('Fetching questions from Open Trivia DB...');
+        const response = await fetch('https://opentdb.com/api.php?amount=10&type=multiple');
+        const data = await response.json();
+
+        if (data.response_code !== 0) {
+            throw new Error(`API returned error code: ${data.response_code}`);
+        }
+
+        return data.results.map(q => {
+            const decodedQuestion = he.decode(q.question);
+            const correctAnswer = he.decode(q.correct_answer);
+            const incorrectAnswers = q.incorrect_answers.map(ansi => he.decode(ansi));
+            
+            // Combine and shuffle options
+            const options = [...incorrectAnswers, correctAnswer].sort(() => Math.random() - 0.5);
+
+            return {
+                question: decodedQuestion,
+                options: options,
+                answer: correctAnswer
+            };
+        });
+    } catch (error) {
+        console.error('Failed to fetch from API, falling back to local questions:', error.message);
+        try {
+            const rawData = fs.readFileSync('questions.json');
+            return JSON.parse(rawData);
+        } catch (fsError) {
+            console.error('Local questions file also failed:', fsError.message);
+            return [];
+        }
+    }
+}
+
 async function sendQuestions(client) {
     try {
         const chatId = `${TARGET_PHONE_NUMBER}@c.us`;
         
-        // Read questions from JSON file
-        const rawData = fs.readFileSync('questions.json');
-        let questions = JSON.parse(rawData);
+        // Fetch questions dynamically
+        const questions = await fetchQuestionsFromAPI();
         
         if (questions.length === 0) {
-            console.log("No questions found in questions.json!");
+            console.log("No questions available!");
             return;
         }
 
-        const selectedQuestions = questions.slice(0, 10);
-        const messageText = formatQuestions(selectedQuestions);
+        // Store globally for message listener to access
+        currentQuiz = questions;
+        
+        const messageText = formatQuestions(questions);
         
         console.log(`Sending message to ${chatId}...`);
         await client.sendMessage(chatId, messageText);
