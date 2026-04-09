@@ -38,6 +38,16 @@ http.createServer(async (req, res) => {
     if (botStatus === 'ready') {
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end('<html><body style="background:#111;color:#0f0;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:monospace;font-size:1.5em"><h1>✅ Bot is connected and running!</h1><p><a href="/send" style="color:#0ff;font-size:0.8em">Click here to send flashcards now</a></p></body></html>');
+    } else if (botStatus === 'pairing' && global.pairingCode) {
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end(`<html><body style="background:#111;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:monospace">
+            <h1 style="font-size:2em">📱 Link WhatsApp</h1>
+            <p style="font-size:1.2em">Open WhatsApp → Linked Devices → Link a Device</p>
+            <p style="font-size:1.2em">→ Tap <b>"Link with phone number instead"</b></p>
+            <p style="font-size:1.2em">→ Enter your phone number, then enter this code:</p>
+            <h1 style="font-size:4em;color:#0f0;letter-spacing:10px;margin:30px">${global.pairingCode}</h1>
+            <p style="color:#888">This code is valid for a limited time. Refresh if expired.</p>
+        </body></html>`);
     } else if (latestQR) {
         const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(latestQR)}`;
         res.writeHead(200, { 'Content-Type': 'text/html' });
@@ -49,7 +59,7 @@ http.createServer(async (req, res) => {
         </body></html>`);
     } else {
         res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end('<html><head><meta http-equiv="refresh" content="3"></head><body style="background:#111;color:#ff0;display:flex;align-items:center;justify-content:center;height:100vh;font-family:monospace;font-size:1.5em"><h1>⏳ Waiting for QR code... (auto-refreshing)</h1></body></html>');
+        res.end('<html><head><meta http-equiv="refresh" content="3"></head><body style="background:#111;color:#ff0;display:flex;align-items:center;justify-content:center;height:100vh;font-family:monospace;font-size:1.5em"><h1>⏳ Starting up... (auto-refreshing)</h1></body></html>');
     }
 }).listen(PORT, () => {
     console.log(`Web server listening on port ${PORT} (Required for Render health checks)`);
@@ -115,13 +125,36 @@ async function startBot() {
     });
 
     let isReady = false;
+    let pairingCodeRequested = false;
 
-    client.on('qr', (qr) => {
-        latestQR = qr; // Store for web page
-        console.log('\n--- ACTION REQUIRED ---');
-        console.log('Scan the QR at your Render URL or use the link below:');
-        qrcode.generate(qr, { small: false });
-        console.log(`\nQR URL: https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(qr)}`);
+    client.on('qr', async (qr) => {
+        // Instead of QR scanning, use pairing code (more reliable on low-memory servers)
+        if (!pairingCodeRequested) {
+            pairingCodeRequested = true;
+            const phoneNumber = TARGET_PHONE_NUMBER; // without @c.us
+            try {
+                const code = await client.requestPairingCode(phoneNumber);
+                const formattedCode = code.match(/.{1,4}/g).join('-');
+                console.log(`\n========================================`);
+                console.log(`📱 PAIRING CODE: ${formattedCode}`);
+                console.log(`========================================`);
+                console.log(`Go to WhatsApp → Linked Devices → Link a Device`);
+                console.log(`→ "Link with phone number instead"`);
+                console.log(`→ Enter your phone number`);
+                console.log(`→ Enter the code: ${formattedCode}`);
+                console.log(`========================================\n`);
+                
+                // Store for web page display
+                latestQR = null;
+                botStatus = 'pairing';
+                global.pairingCode = formattedCode;
+            } catch (err) {
+                console.error('Failed to get pairing code:', err.message);
+                // Fallback to QR
+                latestQR = qr;
+                console.log(`QR URL: https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(qr)}`);
+            }
+        }
     });
 
     if (USE_REMOTE_AUTH) {
