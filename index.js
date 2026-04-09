@@ -3,12 +3,15 @@ const qrcode = require('qrcode-terminal');
 const { Client, RemoteAuth, LocalAuth, Poll } = require('whatsapp-web.js');
 const cron = require('node-cron');
 const fs = require('fs');
+const path = require('path');
 const http = require('http');
 const he = require('he');
 
 // ==== CONFIGURATION ====
 const TARGET_PHONE_NUMBER = process.env.TARGET_PHONE_NUMBER || '919930488938'; 
 const CRON_SCHEDULE = process.env.CRON_SCHEDULE || '0 9 * * *';
+const FLASHCARD_SCHEDULE = process.env.FLASHCARD_SCHEDULE || '0 20 * * *'; // 8 PM daily
+const FLASHCARDS_PER_DAY = parseInt(process.env.FLASHCARDS_PER_DAY) || 10;
 const MONGODB_URI = process.env.MONGODB_URI;
 const USE_REMOTE_AUTH = process.env.USE_REMOTE_AUTH === 'true';
 // =======================
@@ -23,6 +26,7 @@ http.createServer((req, res) => {
 });
 
 let currentQuiz = []; // Store the latest quiz for answer verification globally
+let flashcardIndex = 0; // Track which flashcards have been sent
 
 async function startBot() {
     let authStrategy;
@@ -94,15 +98,15 @@ async function startBot() {
     client.on('ready', () => {
         console.log('🚀 WhatsApp Client is ready! Dashboard connected.');
         isReady = true;
-        
-        // Set up the daily cron job
-        cron.schedule(CRON_SCHEDULE, () => {
-            console.log(`[${new Date().toLocaleString()}] Running scheduled job to send questions...`);
-            sendQuestions(client);
+
+        // Set up the daily flashcard cron job
+        cron.schedule(FLASHCARD_SCHEDULE, () => {
+            console.log(`[${new Date().toLocaleString()}] Running scheduled job to send flashcards...`);
+            sendFlashcards(client);
         });
         
-        console.log(`Cron job scheduled with: ${CRON_SCHEDULE}`);
-        console.log('Type "test" in this terminal to send a quiz immediately.');
+        console.log(`Flashcards scheduled: ${FLASHCARD_SCHEDULE}`);
+        console.log('Type "flash" to send flashcards now.');
     });
 
     // Handle ALL messages (including your own) for answer verification
@@ -139,16 +143,16 @@ async function startBot() {
         }
     });
 
-    // Handle terminal input so the user can type "test" to see it working instantly (Local only)
+    // Handle terminal input (Local only)
     process.stdin.on('data', (data) => {
-        const input = data.toString().trim();
-        if (input === 'test') {
-            if (!isReady) {
-                console.log("Client is not ready yet. Please wait or authenticate.");
-                return;
-            }
-            console.log("Manual test triggered. Sending questions now...");
-            sendQuestions(client);
+        const input = data.toString().trim().toLowerCase();
+        if (!isReady) {
+            console.log("Client is not ready yet. Please wait or authenticate.");
+            return;
+        }
+        if (input === 'flash') {
+            console.log("Manual test triggered. Sending flashcards now...");
+            sendFlashcards(client);
         }
     });
 
@@ -229,10 +233,107 @@ async function sendQuestions(client) {
         
         const messageText = formatQuestions(questions);
         
-        console.log(`Sending message to ${chatId}...`);
+        console.log(`Sending trivia to ${chatId}...`);
         await client.sendMessage(chatId, messageText);
-        console.log('Message sent successfully!');
+        console.log('Trivia sent successfully!');
     } catch (error) {
-        console.error('Failed to send message:', error);
+        console.error('Failed to send trivia:', error);
+    }
+}
+
+// ==== FLASHCARD SYSTEM ====
+
+function cleanLatex(text) {
+    // Remove LaTeX delimiters and clean up for WhatsApp readability
+    return text
+        .replace(/\$([^$]+)\$/g, '$1')       // Remove $ delimiters
+        .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '($1 / $2)') // \frac{a}{b} -> (a / b)
+        .replace(/\\Sigma_\{([^}]+)\}/g, 'Σ_$1')  // \Sigma_{s} -> Σ_s
+        .replace(/\\Sigma/g, 'Σ')             // \Sigma -> Σ
+        .replace(/\\xi/g, 'ξ')               // \xi -> ξ
+        .replace(/\\text\{([^}]+)\}/g, '$1')  // \text{barns} -> barns
+        .replace(/\^\{([^}]+)\}/g, '^$1')     // ^{2} -> ^2
+        .replace(/_\{([^}]+)\}/g, '_$1')      // _{s} -> _s
+        .replace(/\\circ/g, '°')             // \circ -> °
+        .replace(/\\/g, '');                  // Remove remaining backslashes
+}
+
+function loadFlashcards() {
+    const flashcardsDir = path.join(__dirname, 'flashcards', 'moderator');
+    let allCards = [];
+
+    try {
+        const files = fs.readdirSync(flashcardsDir).filter(f => f.endsWith('.csv'));
+        
+        for (const file of files) {
+            const filePath = path.join(flashcardsDir, file);
+            const content = fs.readFileSync(filePath, 'utf-8');
+            const lines = content.split('\n').filter(line => line.trim());
+            
+            // Skip header row
+            for (let i = 1; i < lines.length; i++) {
+                const line = lines[i];
+                // Parse CSV with quoted fields
+                const match = line.match(/^"([^"]*)","([^"]*)"$/);
+                if (match) {
+                    allCards.push({
+                        front: cleanLatex(match[1]),
+                        back: cleanLatex(match[2])
+                    });
+                }
+            }
+        }
+        
+        console.log(`Loaded ${allCards.length} flashcards from ${files.length} CSV file(s).`);
+    } catch (error) {
+        console.error('Error loading flashcards:', error.message);
+    }
+
+    return allCards;
+}
+
+function formatFlashcards(cards) {
+    let messageBody = `*📚 Daily Flashcard Review!*\n\n`;
+    
+    cards.forEach((card, index) => {
+        messageBody += `*${index + 1}.* ${card.front}\n\n`;
+    });
+    messageBody += `\n━━━━━━━━━━━━━━━━━━━━\n`;
+    messageBody += `_Scroll down for answers!_\n\n\n\n\n\n\n\n\n\n`;
+    messageBody += `*📝 Answers:*\n`;
+    cards.forEach((card, index) => {
+        messageBody += `*${index + 1}.* ${card.back}\n\n`;
+    });
+    
+    return messageBody;
+}
+
+async function sendFlashcards(client) {
+    try {
+        const chatId = `${TARGET_PHONE_NUMBER}@c.us`;
+        const allCards = loadFlashcards();
+        
+        if (allCards.length === 0) {
+            console.log("No flashcards found in flashcards/moderator/");
+            return;
+        }
+
+        // Wrap around if we've gone through all cards
+        if (flashcardIndex >= allCards.length) {
+            flashcardIndex = 0;
+            console.log('All flashcards reviewed! Starting from the beginning.');
+        }
+
+        // Pick the next batch
+        const batch = allCards.slice(flashcardIndex, flashcardIndex + FLASHCARDS_PER_DAY);
+        flashcardIndex += batch.length;
+        
+        const messageText = formatFlashcards(batch);
+        
+        console.log(`Sending ${batch.length} flashcards (${flashcardIndex}/${allCards.length} total)...`);
+        await client.sendMessage(chatId, messageText);
+        console.log('Flashcards sent successfully!');
+    } catch (error) {
+        console.error('Failed to send flashcards:', error);
     }
 }
