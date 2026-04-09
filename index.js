@@ -109,10 +109,6 @@ async function startBot() {
 
     const client = new Client({
         authStrategy: authStrategy,
-        pairWithPhoneNumber: {
-            phone: TARGET_PHONE_NUMBER,
-            showNotification: true
-        },
         puppeteer: {
             executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
             args: [
@@ -132,32 +128,35 @@ async function startBot() {
     let pairingCodeRequested = false;
 
     client.on('qr', async (qr) => {
-        // Instead of QR scanning, use pairing code (more reliable on low-memory servers)
+        // Try pairing code (more reliable on low-memory servers)
         if (!pairingCodeRequested) {
             pairingCodeRequested = true;
-            const phoneNumber = TARGET_PHONE_NUMBER; // without @c.us
+            // Wait 3 seconds for WhatsApp Web page to fully load
+            await new Promise(r => setTimeout(r, 3000));
             try {
-                const code = await client.requestPairingCode(phoneNumber);
+                const code = await client.requestPairingCode(TARGET_PHONE_NUMBER, true);
                 const formattedCode = code.match(/.{1,4}/g).join('-');
                 console.log(`\n========================================`);
                 console.log(`📱 PAIRING CODE: ${formattedCode}`);
                 console.log(`========================================`);
-                console.log(`Go to WhatsApp → Linked Devices → Link a Device`);
+                console.log(`WhatsApp → Linked Devices → Link a Device`);
                 console.log(`→ "Link with phone number instead"`);
-                console.log(`→ Enter your phone number`);
-                console.log(`→ Enter the code: ${formattedCode}`);
+                console.log(`→ Enter code: ${formattedCode}`);
                 console.log(`========================================\n`);
                 
-                // Store for web page display
                 latestQR = null;
                 botStatus = 'pairing';
                 global.pairingCode = formattedCode;
             } catch (err) {
-                console.error('Failed to get pairing code:', err.message);
+                console.error('Failed to get pairing code. Full error:', JSON.stringify(err, Object.getOwnPropertyNames(err)));
                 // Fallback to QR
                 latestQR = qr;
-                console.log(`QR URL: https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(qr)}`);
+                botStatus = 'starting';
+                console.log(`Falling back to QR. Scan at your Render URL.`);
             }
+        } else {
+            // Subsequent QR events — just update the QR for fallback display
+            latestQR = qr;
         }
     });
 
