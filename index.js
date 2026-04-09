@@ -202,7 +202,14 @@ async function startBot() {
                     await new Promise(r => setTimeout(r, 3000));
                     connectToWhatsApp();
                 } else {
-                    console.log('Logged out. Please delete auth and restart.');
+                    console.log('Logged out (401). Clearing auth state and restarting...');
+                    if (USE_REMOTE_AUTH && MONGODB_URI) {
+                        await AuthState.deleteMany({});
+                    } else {
+                        fs.rmSync(path.join(__dirname, '.wwebjs_auth'), { recursive: true, force: true });
+                    }
+                    console.log('Auth state cleared. Exiting to trigger Render restart...');
+                    process.exit(1);
                 }
             } else if (connection === 'open') {
                 console.log('✅ WhatsApp connected successfully!');
