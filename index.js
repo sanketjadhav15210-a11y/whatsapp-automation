@@ -1,5 +1,6 @@
 require('dotenv').config();
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, initAuthCreds } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion, makeCacheableSignalKeyStore, initAuthCreds, BufferJSON } = require('@whiskeysockets/baileys');
+const pino = require('pino');
 const cron = require('node-cron');
 const fs = require('fs');
 const path = require('path');
@@ -56,18 +57,24 @@ let AuthState;
 if (USE_REMOTE_AUTH && MONGODB_URI) {
     const authSchema = new mongoose.Schema({
         key: { type: String, unique: true },
-        value: mongoose.Schema.Types.Mixed
+        value: String
     });
     AuthState = mongoose.model('BaileysAuth', authSchema);
 }
 
 async function mongoAuthState() {
     const writeData = async (key, data) => {
-        await AuthState.updateOne({ key }, { key, value: data }, { upsert: true });
+        await AuthState.updateOne({ key }, { key, value: JSON.stringify(data, BufferJSON.replacer) }, { upsert: true });
     };
     const readData = async (key) => {
         const doc = await AuthState.findOne({ key });
-        return doc ? doc.value : null;
+        try {
+            return doc ? JSON.parse(doc.value, BufferJSON.reviver) : null;
+        } catch (e) {
+            // If the old format was saved or JSON parsing fails, wipe it
+            await AuthState.deleteOne({ key });
+            return null;
+        }
     };
     const removeData = async (key) => {
         await AuthState.deleteOne({ key });
@@ -148,11 +155,14 @@ async function startBot() {
         const { version } = await fetchLatestBaileysVersion();
         console.log(`Using WA version: ${version.join('.')}`);
 
+        const logger = pino({ level: 'silent' });
+
         const sock = makeWASocket({
+            logger,
             version,
             auth: {
                 creds: state.creds,
-                keys: makeCacheableSignalKeyStore(state.keys, console.log)
+                keys: makeCacheableSignalKeyStore(state.keys, logger)
             },
             printQRInTerminal: true, // Output to log to make debugging easier
             browser: ["Ubuntu", "Chrome", "20.0.04"],
