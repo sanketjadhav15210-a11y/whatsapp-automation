@@ -20,12 +20,24 @@ const USE_REMOTE_AUTH = process.env.USE_REMOTE_AUTH === 'true';
 let latestQR = null;
 let botStatus = 'starting';
 
-// Web server that shows QR code for easy scanning
+// Reference to client for web trigger
+let clientRef = null;
+
+// Web server that shows QR code for easy scanning + /send trigger
 const PORT = process.env.PORT || 3000;
-http.createServer((req, res) => {
+http.createServer(async (req, res) => {
+    const url = req.url;
+    
+    if (url === '/send' && botStatus === 'ready' && clientRef) {
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end('<html><body style="background:#111;color:#0f0;display:flex;align-items:center;justify-content:center;height:100vh;font-family:monospace;font-size:1.5em"><h1>📚 Sending flashcards now! Check WhatsApp.</h1></body></html>');
+        sendFlashcards(clientRef);
+        return;
+    }
+    
     if (botStatus === 'ready') {
         res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end('<html><body style="background:#111;color:#0f0;display:flex;align-items:center;justify-content:center;height:100vh;font-family:monospace;font-size:2em"><h1>✅ Bot is connected and running!</h1></body></html>');
+        res.end('<html><body style="background:#111;color:#0f0;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:monospace;font-size:1.5em"><h1>✅ Bot is connected and running!</h1><p><a href="/send" style="color:#0ff;font-size:0.8em">Click here to send flashcards now</a></p></body></html>');
     } else if (latestQR) {
         const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(latestQR)}`;
         res.writeHead(200, { 'Content-Type': 'text/html' });
@@ -131,6 +143,7 @@ async function startBot() {
         isReady = true;
         botStatus = 'ready';
         latestQR = null;
+        clientRef = client;
 
         // Set up the daily flashcard cron job
         cron.schedule(FLASHCARD_SCHEDULE, () => {
