@@ -37,11 +37,27 @@ async function startBot() {
         const { MongoStore } = require('wwebjs-mongo');
         
         console.log('Connecting to MongoDB for RemoteAuth...');
-        await mongoose.connect(MONGODB_URI);
-        console.log('Connected to MongoDB.');
+        // Retry connection up to 5 times with delay
+        let connected = false;
+        for (let attempt = 1; attempt <= 5; attempt++) {
+            try {
+                await mongoose.connect(MONGODB_URI, { family: 4 }); // Force IPv4
+                console.log('Connected to MongoDB.');
+                connected = true;
+                break;
+            } catch (err) {
+                console.log(`MongoDB connection attempt ${attempt}/5 failed: ${err.code || err.message}`);
+                if (attempt < 5) {
+                    console.log('Retrying in 5 seconds...');
+                    await new Promise(r => setTimeout(r, 5000));
+                }
+            }
+        }
+        if (!connected) throw new Error('Could not connect to MongoDB after 5 attempts.');
         
         const store = new MongoStore({ mongoose: mongoose });
         authStrategy = new RemoteAuth({
+            clientId: 'flashcard-bot',
             store: store,
             backupSyncIntervalMs: 300000 // 5 minutes
         });
